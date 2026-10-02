@@ -453,7 +453,7 @@ kbd {
   h1 { font-size: 16px; line-height: 1.45; }
   .header-actions { flex-direction: row; flex-wrap: wrap; justify-content: space-between; width: 100%; gap: 12px; }
   .save-state { font-size: 12px; }
-  main { gap: 14px; margin-bottom: 24px; }
+  main { gap: 14px; margin-bottom: 0; padding-bottom: calc(var(--mark-space, 200px) + 16px); }
   .panel { padding: 14px; border-radius: 14px; }
   .section-heading { align-items: flex-start; flex-direction: column; }
 
@@ -560,6 +560,9 @@ kbd {
   .bulk-note, .bulk-preview { grid-column: auto; white-space: normal; }
   .status-detail-heading > div { align-items: flex-start; flex-direction: column; gap: 4px; }
   .status-detail-heading span { white-space: normal; }
+  .report { scroll-margin-top: 200px; scroll-margin-bottom: var(--mark-space, 200px); }
+  .report .section-heading { width: 100%; }
+  .report .copy-report { width: 100%; min-height: 48px; }
   .report pre { padding: 14px; font-size: 13px; }
 }
 

@@ -604,17 +604,39 @@ function exportCsv() {
 }
 
 async function copyReport() {
+  const text = buildReport();
   try {
-    await navigator.clipboard.writeText(buildReport());
+    await navigator.clipboard.writeText(text);
     toast("Đã sao chép tin nhắn.");
-  } catch {
-    const selection = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents($("#reportText"));
-    selection.removeAllRanges();
-    selection.addRange(range);
-    toast("Hãy chọn Sao chép trên thiết bị.");
+    return;
+  } catch {}
+
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.top = "12px";
+  area.style.left = "12px";
+  area.style.fontSize = "16px";
+  document.body.appendChild(area);
+  area.focus();
+  area.select();
+  let copied = false;
+  try { copied = document.execCommand("copy"); } catch {}
+  area.remove();
+  if (copied) {
+    toast("Đã sao chép tin nhắn.");
+    return;
   }
+
+  const report = $(".report");
+  report.scrollIntoView({ behavior: "smooth", block: "start" });
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents($("#reportText"));
+  selection.removeAllRanges();
+  selection.addRange(range);
+  toast("Giữ tin nhắn rồi chọn Sao chép.");
 }
 
 let toastTimer;
