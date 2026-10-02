@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#163b32">
+  <title>Sổ kiểm chứng từ</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=18">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Sổ kiểm chứng từ</p>
+      <h1 id="sessionSummary">Đang chuẩn bị danh sách</h1>
+    </div>
+    <div class="header-actions">
+      <div class="save-state" id="saveState"><span></span> Đã lưu trên máy</div>
+      <button id="editSetupBtn" type="button" aria-expanded="false">Sửa thùng</button>
+      <button class="text-button danger" id="resetBtn" type="button">Làm lại</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="setup panel" id="setupPanel" hidden aria-labelledby="setupTitle">
+      <div class="section-heading">
+        <div>
+          <p class="step">Thông tin thùng</p>
+          <h2 id="setupTitle">Phạm vi phiếu cần kiểm</h2>
+        </div>
+      </div>
+      <div class="form-grid">
+        <label>
+          <span>Tên shop</span>
+          <input id="shop" value="35HV" autocomplete="off">
+        </label>
+        <label>
+          <span>Tháng</span>
+          <input id="month" type="month" value="2026-05">
+        </label>
+        <label>
+          <span>Thùng số</span>
+          <input id="box" type="number" min="1" value="44" inputmode="numeric">
+        </label>
+        <label>
+          <span>Từ số</span>
+          <input id="startNumber" type="number" min="0" value="139" inputmode="numeric">
+        </label>
+        <label>
+          <span>Đến số</span>
+          <input id="endNumber" type="number" min="0" value="300" inputmode="numeric">
+        </label>
+        <label class="wide-field">
+          <span>Tiền tố số phiếu <small>(không bắt buộc)</small></span>
+          <input id="prefix" value="N.KG35HV.26.05." placeholder="VD: N.KG35HV.26.05." autocomplete="off">
+        </label>
+      </div>
+      <div class="setup-actions">
+        <button class="primary-button" id="createListBtn" type="button">Cập nhật danh sách</button>
+        <button class="secondary-button" id="closeSetupBtn" type="button">Đóng</button>
+      </div>
+    </section>
+
+    <section class="workspace panel" id="workspace" aria-labelledby="checkTitle">
+      <h2 class="visually-hidden" id="checkTitle">Bảng kiểm phiếu</h2>
+      <div class="sticky-progress" id="stickyProgress">
+        <div class="sticky-main">
+          <div class="current-ticket">
+            <span>Đang kiểm</span>
+            <strong id="currentTicketNumber">—</strong>
+          </div>
+          <div class="progress-wrap">
+            <div><strong id="progressText">0 / 0</strong> <span>đã kiểm</span></div>
+            <div class="progress-track"><i id="progressBar"></i></div>
+          </div>
+        </div>
+        <div class="status-counters" id="statusCounters"></div>
+        <div class="sticky-actions">
+          <button class="quick-bulk-toggle" id="showBulkPanelBtn" type="button" aria-expanded="false"><span class="wide-label">Cập nhật nhiều số</span><span class="short-label">Nhiều số</span></button>
+          <button class="secondary-button copy-report" type="button"><span class="wide-label">Sao chép tin</span><span class="short-label">Sao chép</span></button>
+          <button class="primary-button export-csv" type="button"><span class="wide-label">Xuất CSV</span><span class="short-label">CSV</span></button>
+          <input class="jump-field" id="jumpNumber" type="number" placeholder="Đến số" aria-label="Đến số phiếu" inputmode="numeric">
+        </div>
+
+        <div class="marking-bar">
+          <div class="marking-current">
+            <span>Phiếu</span>
+            <strong id="mobileTicketNumber">—</strong>
+          </div>
+          <button class="add-status-button" id="showCustomStatusBtn" type="button">+ Lỗi khác</button>
+          <div class="marking-buttons" id="markingButtons" role="group" aria-label="Đánh dấu phiếu đang chọn"></div>
+        </div>
+        <p class="keyboard-note" id="keyboardShortcuts"></p>
+
+        <div class="custom-status-form" id="customStatusForm" hidden>
+          <label>
+            <span>Mã viết tắt</span>
+            <input id="customStatusCode" maxlength="10" placeholder="VD: TKBK" autocomplete="off">
+          </label>
+          <label>
+            <span>Nội dung báo cáo</span>
+            <input id="customStatusLabel" maxlength="60" placeholder="VD: Thiếu biên bản kiểm" autocomplete="off">
+          </label>
+          <button class="save-custom-status" id="saveCustomStatusBtn" type="button">Thêm loại lỗi</button>
+          <button class="cancel-custom-status" id="cancelCustomStatusBtn" type="button">Hủy</button>
+        </div>
+
+        <div class="sticky-bulk-panel" id="bulkPanel" hidden>
+          <div class="sticky-bulk-copy">
+            <strong>Thêm lỗi cho nhiều phiếu</strong>
+            <span>150-151, 153, 170-172</span>
+          </div>
+          <div class="sticky-bulk-fields">
+            <input id="bulkNumbers" placeholder="Nhập số hoặc dải số…" autocomplete="off" aria-label="Các số phiếu">
+            <select id="bulkStatus" aria-label="Trạng thái áp dụng">
+              <option value="tkpn">Thêm TKPN</option>
+              <option value="tkbb">Thêm TKBB</option>
+              <option value="missing">Thêm thiếu toàn bộ</option>
+              <option value="ok">Đổi thành OK</option>
+              <option value="skipped">Đổi thành bỏ số</option>
+              <option value="unchecked">Đưa về chưa kiểm</option>
+            </select>
+            <button class="apply-sticky-bulk" id="applyBulkBtn" type="button">Áp dụng</button>
+            <button class="close-sticky-bulk" id="closeBulkPanelBtn" type="button" aria-label="Đóng cập nhật nhanh">×</button>
+          </div>
+          <p class="bulk-note">Lỗi được thêm vào lỗi sẵn có. OK, bỏ số và chưa kiểm sẽ thay toàn bộ trạng thái.</p>
+          <p class="bulk-preview" id="bulkPreview">Nhập số phiếu để xem trước.</p>
+        </div>
+
+        <div class="status-detail" id="statusDetail" hidden>
+          <div class="status-detail-heading">
+            <div>
+              <strong id="statusDetailTitle"></strong>
+              <span id="statusDetailRanges"></span>
+            </div>
+            <button id="closeStatusDetailBtn" type="button" aria-label="Đóng danh sách">×</button>
+          </div>
+          <div class="status-number-list" id="statusNumberList"></div>
+        </div>
+      </div>
+
+      <div class="ticket-grid" id="ticketGrid" aria-live="polite"></div>
+      <p class="empty-filter" id="emptyFilter" hidden>Không có phiếu nào trong mục này.</p>
+    </section>
+
+    <section class="report panel" aria-labelledby="reportTitle">
+      <div class="section-heading">
+        <div>
+          <p class="step">Tin nhắn báo cáo</p>
+          <h2 id="reportTitle">Nội dung gửi quản lý</h2>
+        </div>
+        <button class="secondary-button copy-report" type="button">Sao chép tin</button>
+      </div>
+      <pre id="reportText"></pre>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <template id="ticketTemplate">
+    <article class="ticket" tabindex="0">
+      <button class="skip-ticket-button" type="button" title="Số phiếu không tồn tại — phím 0" aria-label="Đánh dấu số phiếu không tồn tại">∅</button>
+      <div class="ticket-number"></div>
+      <div class="ticket-pills"></div>
+    </article>
+  </template>
+
+  <script src="app.js?v=15"></script>
+</body>
+</html>
