@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=19">
+  <link rel="stylesheet" href="styles.css?v=24">
 </head>
 <body>
   <header class="topbar">
@@ -22,6 +22,14 @@
       <button class="text-button danger" id="resetBtn" type="button">Làm lại</button>
     </div>
   </header>
+
+  <nav class="view-tabs" aria-label="Chuyển màn hình">
+    <div class="view-tabs-inner">
+      <button class="view-tab" type="button" data-view="check" aria-current="page">Kiểm phiếu <em id="tabCheckBadge"></em></button>
+      <button class="view-tab view-tab-report" type="button" data-view="report">Tin nhắn</button>
+      <button class="view-tab" type="button" data-view="worklog">Báo cáo ngày <em id="tabWorklogBadge"></em></button>
+    </div>
+  </nav>
 
   <main>
     <section class="setup panel" id="setupPanel" hidden aria-labelledby="setupTitle">
@@ -44,13 +52,10 @@
           <span>Thùng số</span>
           <input id="box" type="number" min="1" value="44" inputmode="numeric">
         </label>
-        <label>
-          <span>Từ số</span>
-          <input id="startNumber" type="number" min="0" value="139" inputmode="numeric">
-        </label>
-        <label>
-          <span>Đến số</span>
-          <input id="endNumber" type="number" min="0" value="300" inputmode="numeric">
+        <label class="range-field">
+          <span>Dãy số <small>(nhiều dãy cách nhau bằng dấu phẩy)</small></span>
+          <input id="ranges" value="139-300" placeholder="VD: 1-300, 450-600" autocomplete="off" inputmode="text">
+          <small class="range-preview" id="rangePreview"></small>
         </label>
         <label class="wide-field">
           <span>Tiền tố số phiếu <small>(không bắt buộc)</small></span>
@@ -78,9 +83,7 @@
         </div>
         <div class="status-counters" id="statusCounters"></div>
         <div class="sticky-actions">
-          <button class="quick-bulk-toggle" id="showBulkPanelBtn" type="button" aria-expanded="false"><span class="wide-label">Cập nhật nhiều số</span><span class="short-label">Nhiều số</span></button>
-          <button class="secondary-button copy-report" type="button"><span class="wide-label">Sao chép tin</span><span class="short-label">Sao chép</span></button>
-          <button class="primary-button export-csv" type="button"><span class="wide-label">Xuất CSV</span><span class="short-label">CSV</span></button>
+          <button class="quick-bulk-toggle" id="showBulkPanelBtn" type="button" aria-expanded="false">Cập nhật nhiều số</button>
           <input class="jump-field" id="jumpNumber" type="number" placeholder="Đến số" aria-label="Đến số phiếu" inputmode="numeric">
         </div>
 
@@ -89,7 +92,10 @@
             <span>Phiếu</span>
             <strong id="mobileTicketNumber">—</strong>
           </div>
-          <button class="add-status-button" id="showCustomStatusBtn" type="button">+ Lỗi khác</button>
+          <div class="marking-tools">
+            <button class="sheet-tool" id="mobileBulkBtn" type="button">Nhiều số</button>
+            <button class="add-status-button" id="showCustomStatusBtn" type="button">+ Lỗi khác</button>
+          </div>
           <div class="marking-buttons" id="markingButtons" role="group" aria-label="Đánh dấu phiếu đang chọn"></div>
         </div>
         <p class="keyboard-note" id="keyboardShortcuts"></p>
@@ -145,15 +151,110 @@
       <p class="empty-filter" id="emptyFilter" hidden>Không có phiếu nào trong mục này.</p>
     </section>
 
-    <section class="report panel" aria-labelledby="reportTitle">
+    <aside class="report panel" id="reportPanel" aria-labelledby="reportTitle">
+      <p class="step">Tin nhắn báo cáo</p>
+      <h2 id="reportTitle">Gửi quản lý</h2>
+      <pre id="reportText"></pre>
+      <div class="report-actions">
+        <button class="primary-button copy-report" type="button">Sao chép tin</button>
+        <button class="secondary-button export-csv" type="button">Xuất CSV</button>
+      </div>
+      <div class="report-log">
+        <p id="reportLogStatus"></p>
+        <button class="secondary-button" id="reportLogBtn" type="button">Ghi thùng vào báo cáo ngày</button>
+      </div>
+    </aside>
+
+    <section class="worklog panel" id="worklog" aria-labelledby="worklogTitle">
       <div class="section-heading">
         <div>
-          <p class="step">Tin nhắn báo cáo</p>
-          <h2 id="reportTitle">Nội dung gửi quản lý</h2>
+          <p class="step">Bảng công việc</p>
+          <h2 id="worklogTitle">Báo cáo công việc mỗi ngày</h2>
         </div>
-        <button class="secondary-button copy-report" type="button">Sao chép tin</button>
+        <div class="worklog-heading-actions">
+          <button class="primary-button" id="logCurrentBoxBtn" type="button">Ghi thùng đang kiểm</button>
+          <button class="secondary-button" id="addWorklogRowBtn" type="button">Thêm dòng khác</button>
+        </div>
       </div>
-      <pre id="reportText"></pre>
+
+      <div class="worklog-settings">
+        <label>
+          <span>Người thực hiện</span>
+          <input id="worklogWorker" autocomplete="off" placeholder="VD: VŨ ĐÀM KHÁNH HƯNG_S18552">
+        </label>
+        <label>
+          <span>Ca làm việc <small>(không bắt buộc)</small></span>
+          <input id="worklogShift" autocomplete="off" placeholder="VD: Ca sáng">
+        </label>
+        <label>
+          <span>Ngày làm</span>
+          <input id="worklogDate" type="date">
+        </label>
+      </div>
+      <p class="worklog-current" id="worklogCurrent"></p>
+
+      <div class="worklog-form" id="worklogForm" hidden>
+        <label>
+          <span>Ngày</span>
+          <input id="wlDate" type="date">
+        </label>
+        <label>
+          <span>Tên shop</span>
+          <input id="wlShop" autocomplete="off">
+        </label>
+        <label>
+          <span>Tháng PS chứng từ</span>
+          <input id="wlMonth" type="month">
+        </label>
+        <label>
+          <span>Thùng số</span>
+          <input id="wlBox" type="number" min="1" inputmode="numeric">
+        </label>
+        <label>
+          <span>Từ số</span>
+          <input id="wlStart" type="number" min="0" inputmode="numeric">
+        </label>
+        <label>
+          <span>Đến số</span>
+          <input id="wlEnd" type="number" min="0" inputmode="numeric">
+        </label>
+        <label>
+          <span>SL phiếu nhập</span>
+          <input id="wlCount" type="number" min="0" inputmode="numeric">
+        </label>
+        <div class="worklog-form-actions">
+          <button class="primary-button" id="saveWorklogEntryBtn" type="button">Lưu dòng</button>
+          <button class="secondary-button" id="cancelWorklogEntryBtn" type="button">Hủy</button>
+        </div>
+      </div>
+
+      <div class="worklog-day">
+        <div class="worklog-day-heading">
+          <strong id="worklogDayTitle"></strong>
+          <span id="worklogDaySummary"></span>
+        </div>
+        <div class="worklog-list" id="worklogList"></div>
+      </div>
+
+      <div class="worklog-report">
+        <div class="worklog-report-heading">
+          <strong>Tin báo cáo cho chị quản lý</strong>
+          <div class="worklog-report-actions">
+            <button class="primary-button" id="copyDailyReportBtn" type="button">Sao chép tin báo cáo</button>
+            <button class="secondary-button" id="copySheetRowsBtn" type="button">Sao chép dòng để dán vào bảng</button>
+            <button class="secondary-button" id="exportWorklogBtn" type="button">Xuất CSV cả tháng</button>
+          </div>
+        </div>
+        <pre id="dailyReportText"></pre>
+        <p class="worklog-note">Dán dòng vào bảng: chọn ô cột <strong>Ngày</strong> ở dòng trống đầu tiên, rồi dán. Cột “Số PN check/ngày” tự điền ở dòng cuối của ngày.</p>
+      </div>
+
+      <details class="worklog-import">
+        <summary>Nhập các dòng đã có từ bảng của chị</summary>
+        <p>Trong bảng, chọn các dòng từ cột Ngày đến cột SL phiếu nhập, sao chép rồi dán vào đây.</p>
+        <textarea id="worklogImportText" rows="4" placeholder="10/1/26	VŨ ĐÀM KHÁNH HƯNG_S18552		449TKTQ	tháng 06/2026	THÙNG 29: 1 -> 382	1	382	382"></textarea>
+        <button class="secondary-button" id="importWorklogBtn" type="button">Nhập dòng</button>
+      </details>
     </section>
   </main>
 
@@ -167,6 +268,6 @@
     </article>
   </template>
 
-  <script src="app.js?v=16"></script>
+  <script src="app.js?v=19"></script>
 </body>
 </html>

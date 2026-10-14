@@ -18,8 +18,7 @@ const fields = {
   shop: $("#shop"),
   month: $("#month"),
   box: $("#box"),
-  start: $("#startNumber"),
-  end: $("#endNumber"),
+  ranges: $("#ranges"),
   prefix: $("#prefix")
 };
 
@@ -32,14 +31,59 @@ let state = {
 };
 
 function readMeta() {
+  const { ranges } = parseRangeText(fields.ranges.value);
   return {
     shop: fields.shop.value.trim(),
     month: fields.month.value,
     box: fields.box.value,
-    start: Number(fields.start.value),
-    end: Number(fields.end.value),
+    ranges,
+    start: ranges[0]?.[0],
+    end: ranges.at(-1)?.[1],
     prefix: fields.prefix.value.trim()
   };
+}
+
+function toRanges(numbers) {
+  const sorted = [...new Set(numbers)].sort((a, b) => a - b);
+  const ranges = [];
+  sorted.forEach((number) => {
+    const last = ranges.at(-1);
+    if (last && number === last[1] + 1) last[1] = number;
+    else ranges.push([number, number]);
+  });
+  return ranges;
+}
+
+function parseRangeText(text) {
+  const { numbers, invalid } = parseNumbers(String(text || "").trim());
+  return { ranges: toRanges(numbers), invalid, total: new Set(numbers).size };
+}
+
+function rangeCount([from, to]) {
+  return to - from + 1;
+}
+
+function rangeLabel(ranges, separator = " -> ") {
+  return ranges.map(([from, to]) => (from === to ? String(from) : `${from}${separator}${to}`)).join(", ");
+}
+
+function metaRanges(meta) {
+  if (Array.isArray(meta?.ranges) && meta.ranges.length) return meta.ranges;
+  return Number.isInteger(meta?.start) && Number.isInteger(meta?.end) ? [[meta.start, meta.end]] : [];
+}
+
+function updateRangePreview() {
+  const preview = $("#rangePreview");
+  const { ranges, invalid, total } = parseRangeText(fields.ranges.value);
+  if (invalid.length) {
+    preview.textContent = `Không đọc được: ${invalid.join(", ")}`;
+    preview.classList.add("has-warning");
+    return;
+  }
+  preview.classList.toggle("has-warning", total > 2000);
+  preview.textContent = total
+    ? `${ranges.length} dãy · ${formatCount(total)} phiếu${total > 2000 ? " · tối đa 2.000 phiếu" : ""}`
+    : "Nhập dãy số, ví dụ 1-300, 450-600";
 }
 
 function blankTicket() {
@@ -85,13 +129,14 @@ function hydrate() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
     if (!saved?.meta || !saved?.tickets) return false;
-    state.meta = saved.meta;
+    state.meta = { ...saved.meta, ranges: metaRanges(saved.meta) };
+    saved.meta.ranges = rangeLabel(state.meta.ranges, "-");
     state.tickets = Object.fromEntries(
       Object.entries(saved.tickets).map(([number, ticket]) => [number, normalizeTicket(ticket)])
     );
     state.customStatuses = Array.isArray(saved.customStatuses) ? saved.customStatuses : [];
     Object.entries(fields).forEach(([key, input]) => {
-      input.value = state.meta[key] ?? "";
+      input.value = saved.meta[key] ?? "";
     });
     return true;
   } catch {
@@ -116,17 +161,18 @@ function setSetupOpen(open) {
 
 function createList(keepExisting = false) {
   const meta = readMeta();
-  if (!meta.shop || !meta.month || !meta.box || !Number.isInteger(meta.start) || !Number.isInteger(meta.end)) {
+  const { invalid, total } = parseRangeText(fields.ranges.value);
+  if (!meta.shop || !meta.month || !meta.box || !meta.ranges.length) {
     toast("Hãy nhập đủ thông tin thùng.");
     setSetupOpen(true);
     return;
   }
-  if (meta.start > meta.end) {
-    toast("Số bắt đầu phải nhỏ hơn số kết thúc.");
+  if (invalid.length) {
+    toast(`Dãy số không đọc được: ${invalid.join(", ")}`);
     setSetupOpen(true);
     return;
   }
-  if (meta.end - meta.start > 2000) {
+  if (total > 2000) {
     toast("Mỗi thùng tối đa 2.000 phiếu.");
     setSetupOpen(true);
     return;
@@ -135,9 +181,11 @@ function createList(keepExisting = false) {
   const previous = keepExisting ? state.tickets : {};
   state.meta = meta;
   state.tickets = {};
-  for (let number = meta.start; number <= meta.end; number++) {
-    state.tickets[number] = normalizeTicket(previous[number]);
-  }
+  meta.ranges.forEach(([from, to]) => {
+    for (let number = from; number <= to; number++) {
+      state.tickets[number] = normalizeTicket(previous[number]);
+    }
+  });
   state.focusedNumber = meta.start;
   setSetupOpen(false);
   save();
@@ -155,8 +203,18 @@ function renderTickets() {
   const template = $("#ticketTemplate");
   const fragment = document.createDocumentFragment();
   const catalog = new Map(issueCatalog().map((item) => [item.id, item]));
+  let previousNumber = null;
 
   Object.entries(state.tickets).forEach(([number, rawTicket]) => {
+    if (previousNumber !== null && Number(number) !== previousNumber + 1) {
+      const divider = document.createElement("div");
+      divider.className = "range-break";
+      const gapFrom = previousNumber + 1;
+      const gapTo = Number(number) - 1;
+      divider.innerHTML = `<strong>Dãy tiếp theo từ ${number}</strong><span>${gapFrom === gapTo ? gapFrom : `${gapFrom}–${gapTo}`} không thuộc thùng này</span>`;
+      fragment.appendChild(divider);
+    }
+    previousNumber = Number(number);
     const ticket = normalizeTicket(rawTicket);
     const node = template.content.firstElementChild.cloneNode(true);
     node.dataset.number = number;
@@ -266,6 +324,7 @@ function updateBrowserInset() {
   document.body.classList.toggle("keyboard-open", keyboardOpen);
   const bar = $(".marking-bar");
   const mobile = window.matchMedia("(max-width: 700px)").matches;
+  if (mobile && !keyboardOpen && bar && getComputedStyle(bar).display === "none") return;
   const space = !mobile || keyboardOpen || !bar
     ? 16
     : Math.ceil(bar.getBoundingClientRect().height + inset + 20);
@@ -293,11 +352,7 @@ function renderMarkingBar() {
     fragment.appendChild(button);
   });
   $("#markingButtons").replaceChildren(fragment);
-  const shortcutText = actions
-    .filter((action) => action.shortcut)
-    .map((action) => `<kbd>${action.shortcut}</kbd> ${escapeHtml(action.code)}`)
-    .join(" · ");
-  $("#keyboardShortcuts").innerHTML = `${shortcutText} · <kbd>Enter</kbd> sang phiếu sau · <kbd>0</kbd> bỏ số · bấm lại một lỗi để bỏ lỗi đó`;
+  $("#keyboardShortcuts").innerHTML = "Phím số trên nút để đánh dấu · <kbd>Enter</kbd> sang phiếu sau · <kbd>0</kbd> bỏ số · <kbd>←</kbd><kbd>→</kbd> di chuyển · bấm lại một lỗi để bỏ lỗi đó";
 }
 
 function parseNumbers(value) {
@@ -436,7 +491,7 @@ function buildReport() {
   const [year, month] = state.meta.month.split("-");
   const lines = [
     `shop ${state.meta.shop} THÁNG ${Number(month)}/${year}`,
-    `THÙNG ${state.meta.box}: ${state.meta.start} -> ${state.meta.end}`
+    `THÙNG ${state.meta.box}: ${rangeLabel(metaRanges(state.meta))}`
   ];
   issueCatalog().forEach((issue) => {
     const value = formatRanges(numbersByStatus(issue.id));
@@ -531,8 +586,9 @@ function renderSummary() {
   const tickets = Object.values(state.tickets).map(normalizeTicket);
   const active = tickets.filter((ticket) => ticket.mode !== "skipped");
   const checked = active.filter((ticket) => ticket.mode !== "unchecked").length;
-  $("#sessionSummary").textContent = `${state.meta.shop} · ${monthText(state.meta.month)} · Thùng ${state.meta.box} · ${state.meta.start}–${state.meta.end} · ${active.length} phiếu`;
+  $("#sessionSummary").textContent = `${state.meta.shop} · ${monthText(state.meta.month)} · Thùng ${state.meta.box} · ${rangeLabel(metaRanges(state.meta), "–")} · ${active.length} phiếu`;
   $("#progressText").textContent = `${checked} / ${active.length}`;
+  $("#tabCheckBadge").textContent = `${checked}/${active.length}`;
   $("#progressBar").style.width = `${active.length ? (checked / active.length) * 100 : 0}%`;
   $("#reportText").textContent = buildReport();
   updateCurrentTicket();
@@ -559,6 +615,7 @@ function renderAll() {
   renderTickets();
   renderMarkingBar();
   renderSummary();
+  renderWorklogCurrent();
   updateBrowserInset();
 }
 
@@ -603,11 +660,14 @@ function exportCsv() {
   toast("Đã xuất file CSV.");
 }
 
-async function copyReport() {
-  const text = buildReport();
+function copyReport() {
+  copyText(buildReport(), "#reportText", "Đã sao chép tin nhắn.");
+}
+
+async function copyText(text, fallbackSelector, successMessage) {
   try {
     await navigator.clipboard.writeText(text);
-    toast("Đã sao chép tin nhắn.");
+    toast(successMessage);
     return;
   } catch {}
 
@@ -625,18 +685,387 @@ async function copyReport() {
   try { copied = document.execCommand("copy"); } catch {}
   area.remove();
   if (copied) {
-    toast("Đã sao chép tin nhắn.");
+    toast(successMessage);
     return;
   }
 
-  const report = $(".report");
-  report.scrollIntoView({ behavior: "smooth", block: "start" });
+  const target = $(fallbackSelector);
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
   const selection = window.getSelection();
   const range = document.createRange();
-  range.selectNodeContents($("#reportText"));
+  range.selectNodeContents(target);
   selection.removeAllRanges();
   selection.addRange(range);
-  toast("Giữ tin nhắn rồi chọn Sao chép.");
+  toast("Giữ phần được chọn rồi chọn Sao chép.");
+}
+
+const WORKLOG_KEY = "so-kiem-bang-cong-viec-v1";
+const DEFAULT_WORKER = "VŨ ĐÀM KHÁNH HƯNG_S18552";
+let worklog = { worker: DEFAULT_WORKER, shift: "", entries: [] };
+let editingEntryId = null;
+
+const pad2 = (value) => String(value).padStart(2, "0");
+const formatCount = (value) => Number(value || 0).toLocaleString("vi-VN");
+
+function todayValue() {
+  const now = new Date();
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+}
+
+function loadWorklog() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(WORKLOG_KEY));
+    if (saved && Array.isArray(saved.entries)) {
+      worklog = {
+        worker: saved.worker ?? DEFAULT_WORKER,
+        shift: saved.shift ?? "",
+        entries: saved.entries
+      };
+    }
+  } catch {}
+  $("#worklogWorker").value = worklog.worker;
+  $("#worklogShift").value = worklog.shift;
+  $("#worklogDate").value = todayValue();
+}
+
+function saveWorklog() {
+  localStorage.setItem(WORKLOG_KEY, JSON.stringify(worklog));
+}
+
+function viDate(value) {
+  const [year, month, day] = value.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+function sheetDate(value) {
+  const [year, month, day] = value.split("-");
+  return `${Number(month)}/${Number(day)}/${year.slice(2)}`;
+}
+
+function sheetMonth(value) {
+  const [year, month] = String(value || "").split("-");
+  return month ? `tháng ${month}/${year}` : "";
+}
+
+function boxRange(entry) {
+  return `THÙNG ${entry.box}: ${entry.start} -> ${entry.end}`;
+}
+
+function sameBox(a, b) {
+  return a.shop.toUpperCase() === b.shop.toUpperCase()
+    && a.month === b.month
+    && String(a.box) === String(b.box)
+    && Number(a.start) === Number(b.start)
+    && Number(a.end) === Number(b.end);
+}
+
+function sortedEntries(entries) {
+  return [...entries].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
+}
+
+function entriesForDate(date) {
+  return sortedEntries(worklog.entries.filter((entry) => entry.date === date));
+}
+
+function dayTotal(entries) {
+  return entries.reduce((sum, entry) => sum + Number(entry.count || 0), 0);
+}
+
+function boxCount(entries) {
+  return new Set(entries.map((entry) => `${entry.shop.toUpperCase()}|${entry.box}`)).size;
+}
+
+function selectedWorkDate() {
+  return $("#worklogDate").value || todayValue();
+}
+
+function currentBoxEntries(date) {
+  return metaRanges(state.meta).map(([start, end]) => ({
+    date,
+    shop: state.meta.shop,
+    month: state.meta.month,
+    box: state.meta.box,
+    start,
+    end,
+    count: rangeCount([start, end])
+  }));
+}
+
+function currentBoxLabel() {
+  return `THÙNG ${state.meta.box}: ${rangeLabel(metaRanges(state.meta))}`;
+}
+
+function currentBoxTotal() {
+  return metaRanges(state.meta).reduce((sum, range) => sum + rangeCount(range), 0);
+}
+
+function buildDailyReport(date) {
+  const entries = entriesForDate(date);
+  const lines = [`BÁO CÁO CÔNG VIỆC NGÀY ${viDate(date)}`];
+  if (worklog.worker) lines.push(`Người thực hiện: ${worklog.worker}`);
+  if (worklog.shift) lines.push(`Ca làm việc: ${worklog.shift}`);
+  if (!entries.length) {
+    lines.push("- Chưa ghi thùng nào.");
+    return lines.join("\n");
+  }
+  entries.forEach((entry, index) => {
+    lines.push(`${index + 1}. ${entry.shop} · ${sheetMonth(entry.month)} · ${boxRange(entry)} · ${formatCount(entry.count)} phiếu`);
+  });
+  lines.push(`Tổng: ${formatCount(dayTotal(entries))} phiếu nhập · ${boxCount(entries)} thùng`);
+  return lines.join("\n");
+}
+
+function sheetRows(entries) {
+  const rows = [];
+  const byDate = new Map();
+  sortedEntries(entries).forEach((entry) => {
+    if (!byDate.has(entry.date)) byDate.set(entry.date, []);
+    byDate.get(entry.date).push(entry);
+  });
+  byDate.forEach((dayEntries) => {
+    const total = dayTotal(dayEntries);
+    dayEntries.forEach((entry, index) => {
+      rows.push([
+        sheetDate(entry.date),
+        worklog.worker,
+        worklog.shift,
+        entry.shop,
+        sheetMonth(entry.month),
+        boxRange(entry),
+        entry.start,
+        entry.end,
+        entry.count,
+        `THÙNG ${entry.box}`,
+        index === dayEntries.length - 1 ? total : ""
+      ]);
+    });
+  });
+  return rows;
+}
+
+function renderWorklog() {
+  const date = selectedWorkDate();
+  const entries = entriesForDate(date);
+  $("#worklogDayTitle").textContent = date === todayValue() ? `Hôm nay · ${viDate(date)}` : `Ngày ${viDate(date)}`;
+  $("#worklogDaySummary").textContent = entries.length
+    ? `${boxCount(entries)} thùng · ${formatCount(dayTotal(entries))} phiếu nhập`
+    : "Chưa ghi thùng nào";
+
+  const fragment = document.createDocumentFragment();
+  entries.forEach((entry) => {
+    const row = document.createElement("div");
+    row.className = "worklog-row";
+    row.innerHTML = `
+      <div class="worklog-shop"><strong>${escapeHtml(entry.shop)}</strong><span>${escapeHtml(sheetMonth(entry.month))}</span></div>
+      <div class="worklog-range">${escapeHtml(boxRange(entry))}</div>
+      <div class="worklog-count"><strong>${formatCount(entry.count)}</strong> phiếu</div>
+      <div class="worklog-row-actions">
+        <button type="button" data-action="edit">Sửa</button>
+        <button type="button" data-action="delete">Xóa</button>
+      </div>`;
+    row.querySelector('[data-action="edit"]').addEventListener("click", () => openWorklogForm(entry));
+    row.querySelector('[data-action="delete"]').addEventListener("click", () => deleteWorklogEntry(entry.id));
+    fragment.appendChild(row);
+  });
+  if (!entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "worklog-empty";
+    empty.textContent = "Kiểm xong một thùng thì bấm “Ghi thùng đang kiểm” để thêm vào ngày này.";
+    fragment.appendChild(empty);
+  }
+  $("#worklogList").replaceChildren(fragment);
+  $("#dailyReportText").textContent = buildDailyReport(date);
+  renderWorklogCurrent();
+}
+
+function renderWorklogCurrent() {
+  if (!state.meta.shop) return;
+  const entries = currentBoxEntries(selectedWorkDate());
+  const loggedItems = entries.map((entry) => worklog.entries.find((item) => sameBox(item, entry)));
+  const logged = entries.length > 0 && loggedItems.every(Boolean);
+  const partly = !logged && loggedItems.some(Boolean);
+  const loggedDate = loggedItems.find(Boolean)?.date;
+  const label = escapeHtml(currentBoxLabel());
+  const total = formatCount(currentBoxTotal());
+  const note = logged
+    ? ` · <em>đã ghi ngày ${viDate(loggedDate)}</em>`
+    : partly ? ` · <em>đã ghi một phần</em>` : "";
+  $("#worklogCurrent").innerHTML = `Thùng đang kiểm: <strong>${escapeHtml(state.meta.shop)} · ${label}</strong> · ${total} phiếu${note}`;
+  $("#reportLogStatus").innerHTML = logged
+    ? `<em>Đã ghi vào báo cáo ngày ${viDate(loggedDate)}</em>`
+    : `${label} · ${total} phiếu ${partly ? "mới ghi một phần" : "chưa ghi vào báo cáo ngày"}`;
+  $("#reportLogBtn").hidden = logged;
+
+  const today = entriesForDate(todayValue());
+  $("#tabWorklogBadge").textContent = today.length ? formatCount(dayTotal(today)) : "";
+}
+
+function logCurrentBox() {
+  const date = selectedWorkDate();
+  const entries = currentBoxEntries(date);
+  const fresh = entries.filter((entry) => !worklog.entries.some((item) => item.date === date && sameBox(item, entry)));
+  if (!fresh.length) {
+    toast("Thùng này đã có trong ngày.");
+    return;
+  }
+  const elsewhere = fresh
+    .map((entry) => worklog.entries.find((item) => sameBox(item, entry)))
+    .find(Boolean);
+  if (elsewhere && !confirm(`Thùng này đã ghi ngày ${viDate(elsewhere.date)}. Vẫn ghi thêm vào ngày ${viDate(date)}?`)) return;
+  const now = Date.now();
+  fresh.forEach((entry, index) => {
+    worklog.entries.push({ ...entry, id: `w_${now}_${index}`, createdAt: now + index });
+  });
+  saveWorklog();
+  renderWorklog();
+  toast(`Đã ghi ${fresh.length > 1 ? `${fresh.length} dãy của ` : ""}${currentBoxLabel()} vào ngày ${viDate(date)}.`);
+}
+
+function openWorklogForm(entry) {
+  editingEntryId = entry?.id ?? null;
+  const source = entry ?? { ...currentBoxEntries(selectedWorkDate())[0], box: "", start: "", end: "", count: "" };
+  $("#wlDate").value = source.date;
+  $("#wlShop").value = source.shop;
+  $("#wlMonth").value = source.month;
+  $("#wlBox").value = source.box;
+  $("#wlStart").value = source.start;
+  $("#wlEnd").value = source.end;
+  $("#wlCount").value = source.count;
+  $("#saveWorklogEntryBtn").textContent = entry ? "Lưu thay đổi" : "Thêm dòng";
+  $("#worklogForm").hidden = false;
+  $("#worklogForm").scrollIntoView({ behavior: "smooth", block: "center" });
+  (entry ? $("#wlCount") : $("#wlBox")).focus({ preventScroll: true });
+}
+
+function closeWorklogForm() {
+  editingEntryId = null;
+  $("#worklogForm").hidden = true;
+}
+
+function syncWorklogCount() {
+  const start = Number($("#wlStart").value);
+  const end = Number($("#wlEnd").value);
+  if ($("#wlStart").value && $("#wlEnd").value && end >= start) $("#wlCount").value = end - start + 1;
+}
+
+function saveWorklogEntry() {
+  const entry = {
+    date: $("#wlDate").value,
+    shop: $("#wlShop").value.trim().toUpperCase(),
+    month: $("#wlMonth").value,
+    box: $("#wlBox").value.trim(),
+    start: Number($("#wlStart").value),
+    end: Number($("#wlEnd").value),
+    count: Number($("#wlCount").value)
+  };
+  if (!entry.date || !entry.shop || !entry.month || !entry.box || !$("#wlStart").value || !$("#wlEnd").value) {
+    toast("Hãy nhập đủ ngày, shop, tháng, thùng và dãy số.");
+    return;
+  }
+  if (entry.start > entry.end) {
+    toast("Số bắt đầu phải nhỏ hơn số kết thúc.");
+    return;
+  }
+  if (!entry.count) entry.count = entry.end - entry.start + 1;
+  if (editingEntryId) {
+    const index = worklog.entries.findIndex((item) => item.id === editingEntryId);
+    if (index >= 0) worklog.entries[index] = { ...worklog.entries[index], ...entry };
+  } else {
+    worklog.entries.push({ ...entry, id: `w_${Date.now()}`, createdAt: Date.now() });
+  }
+  saveWorklog();
+  $("#worklogDate").value = entry.date;
+  closeWorklogForm();
+  renderWorklog();
+  toast("Đã lưu dòng công việc.");
+}
+
+function deleteWorklogEntry(id) {
+  const entry = worklog.entries.find((item) => item.id === id);
+  if (!entry || !confirm(`Xóa dòng ${entry.shop} · ${boxRange(entry)}?`)) return;
+  worklog.entries = worklog.entries.filter((item) => item.id !== id);
+  saveWorklog();
+  renderWorklog();
+}
+
+function copySheetRows() {
+  const entries = entriesForDate(selectedWorkDate());
+  if (!entries.length) {
+    toast("Ngày này chưa có dòng nào.");
+    return;
+  }
+  const text = sheetRows(entries).map((row) => row.join("\t")).join("\n");
+  copyText(text, "#dailyReportText", `Đã sao chép ${entries.length} dòng. Dán vào cột Ngày của bảng.`);
+}
+
+function exportWorklogCsv() {
+  const month = selectedWorkDate().slice(0, 7);
+  const entries = worklog.entries.filter((entry) => entry.date.startsWith(month));
+  if (!entries.length) {
+    toast("Tháng này chưa có dòng nào.");
+    return;
+  }
+  const [year, monthNumber] = month.split("-");
+  const rows = [
+    ["Ngày", "Người thực hiện", "Ca làm việc", "Tên shop", "Tháng PS chứng từ", "Số lượng thùng", "Từ số", "Đến số", "SL phiếu nhập", "Số thùng", "Số PN check/ngày"],
+    ...sheetRows(entries)
+  ];
+  const blob = new Blob(["\uFEFF" + rows.map((row) => row.map(csvEscape).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `bang-cong-viec-thang-${monthNumber}-${year}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  toast("Đã xuất bảng công việc.");
+}
+
+function parseSheetLine(line) {
+  const cells = line.split("\t").map((cell) => cell.trim());
+  const date = cells[0]?.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+  const month = cells[4]?.match(/(\d{1,2})\s*\/\s*(\d{4})/);
+  const box = (cells[5] || "").match(/TH[ÙU]NG\s*(\d+)/i) || (cells[9] || "").match(/(\d+)/);
+  const toNumber = (value) => Number(String(value || "").replace(/[.,\s]/g, ""));
+  const start = toNumber(cells[6]);
+  const end = toNumber(cells[7]);
+  if (!date || !month || !box || !cells[3] || !cells[6] || !cells[7] || start > end) return null;
+  const year = date[3].length === 2 ? `20${date[3]}` : date[3];
+  return {
+    date: `${year}-${pad2(date[1])}-${pad2(date[2])}`,
+    shop: cells[3].toUpperCase(),
+    month: `${month[2]}-${pad2(month[1])}`,
+    box: box[1],
+    start,
+    end,
+    count: toNumber(cells[8]) || end - start + 1,
+    worker: cells[1] || ""
+  };
+}
+
+function importWorklog() {
+  const lines = $("#worklogImportText").value.split(/\r?\n/).filter((line) => line.trim());
+  let added = 0;
+  let skipped = 0;
+  lines.forEach((line, index) => {
+    const parsed = parseSheetLine(line);
+    if (!parsed || worklog.entries.some((item) => item.date === parsed.date && sameBox(item, parsed))) {
+      skipped++;
+      return;
+    }
+    if (parsed.worker && !worklog.worker) worklog.worker = parsed.worker;
+    delete parsed.worker;
+    worklog.entries.push({ ...parsed, id: `w_${Date.now()}_${index}`, createdAt: Date.now() + index });
+    added++;
+  });
+  if (!added) {
+    toast(skipped ? "Không có dòng mới đọc được." : "Hãy dán các dòng từ bảng.");
+    return;
+  }
+  saveWorklog();
+  $("#worklogImportText").value = "";
+  $("#worklogWorker").value = worklog.worker;
+  renderWorklog();
+  toast(`Đã nhập ${added} dòng${skipped ? `, bỏ qua ${skipped} dòng` : ""}.`);
 }
 
 let toastTimer;
@@ -658,6 +1087,10 @@ function moveFocus(key) {
 }
 
 $("#createListBtn").addEventListener("click", () => createList(true));
+fields.ranges.addEventListener("input", updateRangePreview);
+fields.ranges.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") createList(true);
+});
 $("#editSetupBtn").addEventListener("click", () => setSetupOpen($("#setupPanel").hidden));
 $("#closeSetupBtn").addEventListener("click", () => setSetupOpen(false));
 $("#applyBulkBtn").addEventListener("click", applyBulk);
@@ -700,6 +1133,7 @@ $("#resetBtn").addEventListener("click", () => {
 document.addEventListener("keydown", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
+  if (document.body.dataset.view !== "check") return;
   if (target.closest("input, select, textarea")) return;
   if (target.closest("button") && event.key === "Enter") return;
 
@@ -731,13 +1165,73 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+const wideLayout = window.matchMedia("(min-width: 1181px)");
+const viewScroll = {};
+
+function setView(view, { remember = true } = {}) {
+  if (view === "report" && wideLayout.matches) view = "check";
+  const previous = document.body.dataset.view;
+  if (remember && previous) viewScroll[previous] = window.scrollY;
+  document.body.dataset.view = view;
+  document.querySelectorAll(".view-tab").forEach((tab) => {
+    if (tab.dataset.view === view) tab.setAttribute("aria-current", "page");
+    else tab.removeAttribute("aria-current");
+  });
+  if (view !== "check") {
+    setBulkPanel(false);
+    closeStatusDetail();
+  }
+  if (previous !== view) window.scrollTo(0, viewScroll[view] ?? 0);
+  updateBrowserInset();
+}
+
+document.querySelectorAll(".view-tab").forEach((tab) => {
+  tab.addEventListener("click", () => setView(tab.dataset.view));
+});
+wideLayout.addEventListener("change", () => setView(document.body.dataset.view || "check", { remember: false }));
+$("#mobileBulkBtn").addEventListener("click", () => setBulkPanel($("#bulkPanel").hidden));
+$("#reportLogBtn").addEventListener("click", logCurrentBox);
+$("#logCurrentBoxBtn").addEventListener("click", logCurrentBox);
+$("#addWorklogRowBtn").addEventListener("click", () => openWorklogForm(null));
+$("#saveWorklogEntryBtn").addEventListener("click", saveWorklogEntry);
+$("#cancelWorklogEntryBtn").addEventListener("click", closeWorklogForm);
+$("#wlStart").addEventListener("input", syncWorklogCount);
+$("#wlEnd").addEventListener("input", syncWorklogCount);
+$("#worklogDate").addEventListener("change", renderWorklog);
+$("#worklogWorker").addEventListener("input", (event) => {
+  worklog.worker = event.target.value.trim();
+  saveWorklog();
+  $("#dailyReportText").textContent = buildDailyReport(selectedWorkDate());
+});
+$("#worklogShift").addEventListener("input", (event) => {
+  worklog.shift = event.target.value.trim();
+  saveWorklog();
+  $("#dailyReportText").textContent = buildDailyReport(selectedWorkDate());
+});
+$("#copyDailyReportBtn").addEventListener("click", () => {
+  copyText(buildDailyReport(selectedWorkDate()), "#dailyReportText", "Đã sao chép tin báo cáo.");
+});
+$("#copySheetRowsBtn").addEventListener("click", copySheetRows);
+$("#exportWorklogBtn").addEventListener("click", exportWorklogCsv);
+$("#importWorklogBtn").addEventListener("click", importWorklog);
+
+if ("IntersectionObserver" in window) {
+  new IntersectionObserver(([entry]) => {
+    document.body.classList.toggle("marking-away", !entry.isIntersecting);
+  }).observe($("#ticketGrid"));
+}
+
 updateBrowserInset();
 window.visualViewport?.addEventListener("resize", updateBrowserInset);
 window.visualViewport?.addEventListener("scroll", updateBrowserInset);
 window.addEventListener("resize", updateBrowserInset);
 window.addEventListener("orientationchange", updateBrowserInset);
 
+loadWorklog();
 hydrate();
+updateRangePreview();
+setView("check", { remember: false });
+renderWorklog();
 if (!Object.keys(state.tickets).length) createList(false);
 else {
   state.focusedNumber = Number(
